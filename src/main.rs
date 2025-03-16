@@ -44,7 +44,7 @@ impl Shell {
             "exit" => process::exit(0),
             "echo" => self.cmd_echo(args),
             "type" => self.cmd_type(args),
-            _ => self.cmd_external(command),
+            _ => self.cmd_external(command, args),
         }
         Ok(())
     }
@@ -59,31 +59,62 @@ impl Shell {
         }
         let commands: Vec<&str> = args.split_whitespace().collect();
 
-        'command_loop: for cmd in commands {
-            if self.builtins.contains(&cmd) {
-                println!("{} is a shell builtin", cmd);
+        'command_loop: for command in commands {
+            if self.builtins.contains(&command) {
+                println!("{} is a shell builtin", command);
                 continue;
             }
             if let Ok(path_var) = env::var("PATH") {
                 let paths: Vec<&str> = path_var.split(':').collect();
                 for path in paths {
-                    let full_path = Path::new(path).join(cmd);
+                    let full_path = Path::new(path).join(command);
                     if full_path.exists()
                         && fs::metadata(&full_path)
                             .map(|x| x.is_file())
                             .unwrap_or(false)
                     {
-                        println!("{} is {}", cmd, full_path.to_string_lossy());
+                        println!("{} is {}", command, full_path.to_string_lossy());
                         continue 'command_loop;
                     }
                 }
             }
-            println!("{}: not found", cmd);
+            println!("{}: not found", command);
         }
     }
 
-    fn cmd_external(&self, command: &str) {
-        println!("{}: command not found", command);
+    fn cmd_external(&self, command: &str, args: &str) {
+        if let Ok(path_var) = env::var("PATH") {
+            let paths: Vec<&str> = path_var.split(":").collect();
+            for path in paths {
+                let full_path = Path::new(path).join(command);
+                if full_path.exists()
+                    && fs::metadata(&full_path)
+                        .map(|x| x.is_file())
+                        .unwrap_or(false)
+                {
+                    let arg_vec: Vec<&str> = if args.is_empty() {
+                        Vec::new()
+                    } else {
+                        args.split_whitespace().collect()
+                    };
+
+                    match std::process::Command::new(command)
+                        .args(arg_vec)
+                        .stdout(std::process::Stdio::inherit())
+                        .stderr(std::process::Stdio::inherit())
+                        .stdin(std::process::Stdio::inherit())
+                        .status()
+                    {
+                        Ok(_) => return,
+                        Err(e) => {
+                            eprintln!("Failed to execute {}: {}", command, e);
+                            return;
+                        }
+                    }
+                }
+            }
+            println!("{}: command not found", command);
+        }
     }
 }
 
@@ -91,5 +122,3 @@ fn main() {
     let shell = Shell::new();
     shell.run();
 }
-
-

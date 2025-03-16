@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     env, fs,
     io::{self, Write},
     path::Path,
@@ -6,17 +7,19 @@ use std::{
 };
 
 struct Shell {
-    builtins: Vec<&'static str>,
+    builtins: HashMap<&'static str, fn(&mut Shell, &str)>,
 }
 
 impl Shell {
     fn new() -> Self {
-        Shell {
-            builtins: vec!["exit", "echo", "type"],
-        }
+        let mut builtins = HashMap::new();
+        builtins.insert("echo", Self::cmd_echo as fn(&mut Shell, &str));
+        builtins.insert("type", Self::cmd_type as fn(&mut Shell, &str));
+        builtins.insert("exit", Self::cmd_exit as fn(&mut Shell, &str));
+        Shell { builtins }
     }
 
-    fn run(&self) {
+    fn run(&mut self) {
         loop {
             if let Err(e) = self.prompt_and_execute() {
                 eprint!("Error: {}", e);
@@ -24,7 +27,7 @@ impl Shell {
         }
     }
 
-    fn prompt_and_execute(&self) -> io::Result<()> {
+    fn prompt_and_execute(&mut self) -> io::Result<()> {
         print!("$ ");
         io::stdout().flush()?;
 
@@ -40,27 +43,31 @@ impl Shell {
         let command = parts[0];
         let args = parts.get(1).unwrap_or(&"").trim();
 
-        match command {
-            "exit" => process::exit(0),
-            "echo" => self.cmd_echo(args),
-            "type" => self.cmd_type(args),
-            _ => self.cmd_external(command, args),
+        if let Some(builtin) = self.builtins.get(&command) {
+            builtin(self, args);
+        } else {
+            self.cmd_external(command, args);
         }
+
         Ok(())
     }
 
-    fn cmd_echo(&self, args: &str) {
+    fn cmd_echo(&mut self, args: &str) {
         println!("{}", args)
     }
 
-    fn cmd_type(&self, args: &str) {
+    fn cmd_exit(&mut self, _args: &str) {
+        process::exit(0)
+    }
+
+    fn cmd_type(&mut self, args: &str) {
         if args.is_empty() {
             return;
         }
         let commands: Vec<&str> = args.split_whitespace().collect();
 
         'command_loop: for command in commands {
-            if self.builtins.contains(&command) {
+            if self.builtins.contains_key(&command) {
                 println!("{} is a shell builtin", command);
                 continue;
             }
@@ -119,6 +126,6 @@ impl Shell {
 }
 
 fn main() {
-    let shell = Shell::new();
+    let mut shell = Shell::new();
     shell.run();
 }

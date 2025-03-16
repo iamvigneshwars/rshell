@@ -1,25 +1,42 @@
 use std::{
-    collections::HashMap,
     env, fs,
     io::{self, Write},
     path::{Path, PathBuf},
     process,
 };
 
-struct Shell {
-    builtins: HashMap<&'static str, fn(&Shell, &str)>,
+enum BuiltinCommand {
+    Echo,
+    Type,
+    Exit,
+    Pwd,
 }
 
-impl Shell {
-    fn new() -> Self {
-        let mut builtins = HashMap::new();
-        builtins.insert("echo", Self::cmd_echo as fn(&Shell, &str));
-        builtins.insert("type", Self::cmd_type as fn(&Shell, &str));
-        builtins.insert("exit", Self::cmd_exit as fn(&Shell, &str));
-        builtins.insert("pwd", Self::cmd_pwd as fn(&Shell, &str));
-        Shell { builtins }
+impl BuiltinCommand {
+    fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "echo" => Some(BuiltinCommand::Echo),
+            "type" => Some(BuiltinCommand::Type),
+            "exit" => Some(BuiltinCommand::Exit),
+            "pwd" => Some(BuiltinCommand::Pwd),
+            _ => None,
+        }
     }
 
+    fn execute(&self, shell: &Shell, args: &str) {
+        match self {
+            BuiltinCommand::Echo => shell.cmd_echo(args),
+            BuiltinCommand::Type => shell.cmd_type(args),
+            BuiltinCommand::Exit => shell.cmd_exit(args),
+            BuiltinCommand::Pwd => shell.cmd_pwd(args),
+        }
+    }
+}
+
+#[derive(Default)]
+struct Shell;
+
+impl Shell {
     fn run(&mut self) {
         loop {
             if let Err(e) = self.prompt_and_execute() {
@@ -44,8 +61,8 @@ impl Shell {
         let command = parts[0];
         let args = parts.get(1).unwrap_or(&"").trim();
 
-        if let Some(builtin) = self.builtins.get(command) {
-            builtin(self, args);
+        if let Some(builtin) = BuiltinCommand::from_str(command) {
+            builtin.execute(self, args);
         } else {
             self.cmd_external(command, args);
         }
@@ -74,7 +91,7 @@ impl Shell {
         }
         let commands: Vec<&str> = args.split_whitespace().collect();
         for command in commands {
-            if self.builtins.contains_key(command) {
+            if BuiltinCommand::from_str(command).is_some() {
                 println!("{} is a shell builtin", command);
             } else if let Some(path) = self.find_executable(command) {
                 println!("{} is {}", command, path.display());
@@ -129,6 +146,6 @@ impl Shell {
 }
 
 fn main() {
-    let mut shell = Shell::new();
+    let mut shell = Shell;
     shell.run();
 }

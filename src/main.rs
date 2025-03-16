@@ -10,6 +10,7 @@ enum BuiltinCommand {
     Type,
     Exit,
     Pwd,
+    Cd,
 }
 
 impl BuiltinCommand {
@@ -19,6 +20,7 @@ impl BuiltinCommand {
             "type" => Some(BuiltinCommand::Type),
             "exit" => Some(BuiltinCommand::Exit),
             "pwd" => Some(BuiltinCommand::Pwd),
+            "cd" => Some(BuiltinCommand::Cd),
             _ => None,
         }
     }
@@ -29,6 +31,7 @@ impl BuiltinCommand {
             BuiltinCommand::Type => shell.cmd_type(args),
             BuiltinCommand::Exit => shell.cmd_exit(args),
             BuiltinCommand::Pwd => shell.cmd_pwd(args),
+            BuiltinCommand::Cd => shell.cmd_cd(args),
         }
     }
 }
@@ -74,15 +77,38 @@ impl Shell {
         println!("{}", args);
     }
 
-    fn cmd_pwd(&self, _args: &str) {
+    fn cmd_pwd(&self, args: &str) {
+        if !args.is_empty() {
+            eprintln!("pwd: too many arguments");
+            return;
+        }
+
         match env::current_dir() {
             Ok(path) => println!("{}", path.display()),
             Err(e) => eprintln!("pwd: error getting current directory: {}", e),
         }
     }
 
-    fn cmd_exit(&self, _args: &str) {
-        process::exit(0);
+    fn cmd_cd(&self, args: &str) {
+        let new_dir = if args.is_empty() || args == "~" {
+            env::var("HOME").unwrap_or_else(|_| "/".to_string())
+        } else {
+            args.to_string()
+        };
+
+        if env::set_current_dir(&new_dir).is_err() {
+            eprintln!("cd: {}: No such file or directory", new_dir);
+        }
+    }
+
+    fn cmd_exit(&self, args: &str) {
+        if args.is_empty() {
+            process::exit(0);
+        } else if let Ok(status) = args.parse::<i32>() {
+            process::exit(status);
+        } else {
+            eprintln!("exit: too many arguments");
+        }
     }
 
     fn cmd_type(&self, args: &str) {

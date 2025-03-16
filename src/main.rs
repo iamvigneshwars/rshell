@@ -1,3 +1,6 @@
+
+use std::env;
+use std::fs;
 #[allow(unused_imports)]
 use std::io::{self, Write};
 
@@ -19,11 +22,35 @@ fn main() {
             "type" => {
                 let commands: Vec<&str> = rest.split_whitespace().collect();
                 for command in commands {
+                    let mut found = false;
                     match command {
                         "exit" => println!("exit is a shell builtin"),
                         "echo" => println!("echo is a shell builtin"),
                         "type" => println!("type is a shell builtin"),
-                        _ => println!("{}: not found", command),
+                        _ => {
+                            if let Ok(path_var) = env::var("PATH") {
+                                let paths: Vec<&str> = path_var.split(":").collect();
+
+                                'path_loop: for path in paths {
+                                    if let Ok(entries) = fs::read_dir(path) {
+                                        for entry in entries.flatten() {
+                                            if command == entry.file_name() {
+                                                println!(
+                                                    "{} is {}",
+                                                    command,
+                                                    entry.path().to_string_lossy()
+                                                );
+                                                found = true;
+                                                break 'path_loop;
+                                            }
+                                        }
+                                    }
+                                }
+                                if !found {
+                                    println!("{}: not found", command);
+                                }
+                            }
+                        }
                     }
                 }
             }

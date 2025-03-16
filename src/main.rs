@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     env, fs,
     io::{self, Write},
-    path::Path,
+    path::{Path, PathBuf},
     process,
 };
 
@@ -66,61 +66,73 @@ impl Shell {
         }
         let commands: Vec<&str> = args.split_whitespace().collect();
 
-        'command_loop: for command in commands {
+        for command in commands {
             if self.builtins.contains_key(&command) {
                 println!("{} is a shell builtin", command);
                 continue;
             }
-            if let Ok(path_var) = env::var("PATH") {
-                let paths: Vec<&str> = path_var.split(':').collect();
-                for path in paths {
-                    let full_path = Path::new(path).join(command);
-                    if full_path.exists()
-                        && fs::metadata(&full_path)
-                            .map(|x| x.is_file())
-                            .unwrap_or(false)
-                    {
-                        println!("{} is {}", command, full_path.to_string_lossy());
-                        continue 'command_loop;
-                    }
-                }
+            match self.find_executable(command) {
+                Some(path) => println!("{} is {}", command, path.to_string_lossy()),
+                None => println!("{}: not found", command),
             }
-            println!("{}: not found", command);
         }
     }
 
-    fn cmd_external(&self, command: &str, args: &str) {
-        if let Ok(path_var) = env::var("PATH") {
-            let paths: Vec<&str> = path_var.split(":").collect();
-            for path in paths {
-                let full_path = Path::new(path).join(command);
-                if full_path.exists()
-                    && fs::metadata(&full_path)
-                        .map(|x| x.is_file())
-                        .unwrap_or(false)
-                {
-                    let arg_vec: Vec<&str> = if args.is_empty() {
-                        Vec::new()
-                    } else {
-                        args.split_whitespace().collect()
-                    };
-
-                    match std::process::Command::new(command)
-                        .args(arg_vec)
-                        .stdout(std::process::Stdio::inherit())
-                        .stderr(std::process::Stdio::inherit())
-                        .stdin(std::process::Stdio::inherit())
-                        .status()
-                    {
-                        Ok(_) => return,
-                        Err(e) => {
-                            eprintln!("Failed to execute {}: {}", command, e);
-                            return;
-                        }
-                    }
-                }
+    fn find_executable(&mut self, command: &str) -> Option<PathBuf> {
+        let path_var = match env::var("PATH") {
+            Ok(path) => path,
+            Err(_) => return None,
+        };
+        let paths: Vec<&str> = path_var.split(":").collect();
+        for path in paths {
+            let full_path = Path::new(path).join(command);
+            if full_path.exists() && self.is_executable(&full_path) {
+                return Some(full_path);
             }
-            println!("{}: command not found", command);
+        }
+        None
+    }
+
+    fn cmd_external(&mut self, command: &str, args: &str) {
+        let executable_path = match self.find_executable(command) {
+            Some(path) => path,
+            None => {
+                println!("{}: command not found", command);
+                return;
+            }
+        };
+        if !self.is_executable(&executable_path) {
+            eprintln!("{} is not a executable", command);
+            return;
+        }
+        let arg_vec: Vec<&str> = if args.is_empty() {
+            Vec::new()
+        } else {
+            args.split_whitespace().collect()
+        };
+        match process::Command::new(command)
+            .args(arg_vec)
+            .stdout(process::Stdio::inherit())
+            .stderr(process::Stdio::inherit())
+            .stdin(process::Stdio::inherit())
+            .status()
+        {
+            Ok(_) => (),
+            Err(e) => {
+                eprintln!("Failed to execute {}: {}", command, e);
+            }
+        }
+    }
+    fn is_executable(&self, path: &Path) -> bool {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::metadata(path)
+                .map(|metadata| {
+                    let permissions = metadata.permissions();
+                    metadata.is_file() && (permissions.mode() & 0o111 != 0)
+                })
+                .unwrap_or(false)
         }
     }
 }

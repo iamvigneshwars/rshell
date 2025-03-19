@@ -60,21 +60,68 @@ impl Shell {
             return Ok(());
         }
 
-        let parts: Vec<&str> = input.splitn(2, ' ').collect();
-        let command = parts[0];
-        let args = parts.get(1).unwrap_or(&"").trim();
+        let (command, args) = self.parse_command_inline(input);
 
-        if let Some(builtin) = BuiltinCommand::from_str(command) {
-            builtin.execute(self, args);
+        if let Some(builtin) = BuiltinCommand::from_str(&command) {
+            builtin.execute(self, &args);
         } else {
-            self.cmd_external(command, args);
+            self.cmd_external(&command, &args);
         }
 
         Ok(())
     }
 
+    fn parse_command_inline(&self, input: &str) -> (String, String) {
+        let chars = input.chars().peekable();
+        let mut command = String::new();
+        let mut args = String::new();
+        let mut in_quotes = false;
+        let mut in_command = true;
+
+        for c in chars {
+            if c == ' ' && !in_quotes && in_command {
+                in_command = false;
+                continue;
+            }
+
+            if c == '\'' {
+                in_quotes = !in_quotes;
+                if !in_command {
+                    args.push(c);
+                }
+                continue;
+            }
+
+            if in_command {
+                command.push(c);
+            } else {
+                args.push(c);
+            }
+        }
+
+        if in_quotes {
+            eprint!("Warning: Unclosed quote")
+        }
+
+        (command, args.trim().to_string())
+    }
+
     fn cmd_echo(&self, args: &str) {
-        println!("{}", args);
+        let parsed_args = self.parse_args(args);
+
+        if !parsed_args.is_empty() {
+            let mut first = true;
+            for arg in parsed_args {
+                if !first {
+                    print!(" ");
+                }
+                print!("{}", arg.replace('\'', ""));
+                first = false;
+            }
+            println!();
+        } else {
+            println!();
+        }
     }
 
     fn cmd_pwd(&self, args: &str) {
@@ -143,8 +190,9 @@ impl Shell {
     fn cmd_external(&self, command: &str, args: &str) {
         match self.find_executable(command) {
             Some(path) if self.is_executable(&path) => {
+                let parsed_args = self.parse_args(args);
                 match process::Command::new(command)
-                    .args(args.split_whitespace())
+                    .args(parsed_args)
                     .stdout(process::Stdio::inherit())
                     .stderr(process::Stdio::inherit())
                     .stdin(process::Stdio::inherit())
@@ -157,6 +205,33 @@ impl Shell {
             Some(_) => eprintln!("{} is not executable", command),
             None => println!("{}: command not found", command),
         }
+    }
+
+    fn parse_args(&self, args: &str) -> Vec<String> {
+        let mut result = Vec::new();
+        let mut current_arg = String::new();
+        let mut in_single_quotes = false;
+
+        for c in args.chars() {
+            match c {
+                '\'' => {
+                    in_single_quotes = !in_single_quotes;
+                }
+                ' ' if !in_single_quotes => {
+                    if !current_arg.is_empty() {
+                        result.push(current_arg);
+                        current_arg = String::new();
+                    }
+                }
+                _ => current_arg.push(c),
+            }
+        }
+
+        if !current_arg.is_empty() {
+            result.push(current_arg);
+        }
+
+        result
     }
 
     #[cfg(unix)]
